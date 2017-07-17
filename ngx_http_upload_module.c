@@ -1667,14 +1667,17 @@ static ngx_int_t ngx_http_upload_body_handler(ngx_http_request_t *r) { /* {{{ */
     return rc;
 } /* }}} */
 
-static ngx_int_t ngx_create_upload_temp_file(ngx_file_t *file, ngx_str_t cli_name, ngx_path_t *path,
+static ngx_int_t ngx_create_upload_temp_file(ngx_http_request_t* r, ngx_file_t *file, ngx_str_t cli_name, ngx_path_t *path,
 	ngx_pool_t *pool, ngx_uint_t access)
 {
     char str_tmp_filename[256] = { 0 };
+    char str_tmp_ipaddr[256] = { 0 };
+
+    ngx_uint_t                i;
     uint32_t                  n;
     ngx_err_t                 err;
 
-    file->name.len = path->name.len + 1 + path->len + 10 + cli_name.len + 1;
+    file->name.len = path->name.len + 1 + path->len + 10 + cli_name.len + 1 + 16; // 16: 255.255.255.255
     file->name.data = ngx_pnalloc(pool, file->name.len + 1);
     if (file->name.data == NULL) {
         return NGX_ERROR;
@@ -1687,8 +1690,17 @@ static ngx_int_t ngx_create_upload_temp_file(ngx_file_t *file, ngx_str_t cli_nam
     for ( ;; ) {
         memset(str_tmp_filename, 0, sizeof(str_tmp_filename));
         memcpy(str_tmp_filename, cli_name.data, cli_name.len);
+
+        memset(str_tmp_ipaddr, 0, sizeof(str_tmp_ipaddr));
+        memcpy(str_tmp_ipaddr, r->connection->addr_text.data, r->connection->addr_text.len);
+        for (i = 0; i < r->connection->addr_text.len; i++) {
+            if ('.' == str_tmp_ipaddr[i]) {
+                str_tmp_ipaddr[i] = '-';
+            }
+        }
+
         (void) ngx_sprintf(file->name.data + path->name.len + 1 + path->len,
-                    "%010uD_%s", n, str_tmp_filename); //%010uD%Z
+                    "%010uD_%s_%s", n, str_tmp_ipaddr, str_tmp_filename); //%010uD%Z
 
         ngx_create_hashed_filename(path, file->name.data, file->name.len);
 
@@ -1730,6 +1742,7 @@ static ngx_int_t ngx_http_upload_start_handler(ngx_http_upload_ctx_t *u) { /* {{
     ngx_http_upload_loc_conf_t  *ulcf = ngx_http_get_module_loc_conf(r, ngx_http_upload_module);
 
     char str_tmp_filename[256] = { 0 };
+    char str_tmp_ipaddr[256] = { 0 };
     ngx_file_t  *file = &u->output_file;
     ngx_path_t  *path = ulcf->store_path;
     ngx_uint_t  i;
@@ -1748,7 +1761,7 @@ static ngx_int_t ngx_http_upload_start_handler(ngx_http_upload_ctx_t *u) { /* {{
         if(u->cln == NULL)
             return NGX_UPLOAD_NOMEM;
 
-        file->name.len = path->name.len + 1 + path->len + (u->session_id.len != 0 ? u->session_id.len : 10) + u->file_name.len + 1;
+        file->name.len = path->name.len + 1 + path->len + (u->session_id.len != 0 ? u->session_id.len : 10) + u->file_name.len + 1 + 16; // 16: 255.255.255.255
 
         file->name.data = ngx_palloc(u->request->pool, file->name.len + 1);
 
@@ -1762,8 +1775,17 @@ static ngx_int_t ngx_http_upload_start_handler(ngx_http_upload_ctx_t *u) { /* {{
         if(u->session_id.len != 0) {
             memset(str_tmp_filename, 0, sizeof(str_tmp_filename));
             memcpy(str_tmp_filename, u->file_name.data, u->file_name.len);
+
+            memset(str_tmp_ipaddr, 0, sizeof(str_tmp_ipaddr));
+            memcpy(str_tmp_ipaddr, r->connection->addr_text.data, r->connection->addr_text.len);
+            for (i = 0; i < r->connection->addr_text.len; i++) {
+                if ('.' == str_tmp_ipaddr[i]) {
+                    str_tmp_ipaddr[i] = '-';
+                }
+            }
+
             (void) ngx_sprintf(file->name.data + path->name.len + 1 + path->len,
-                        "%V_%s", &u->session_id, str_tmp_filename);//%V%Z
+                        "%V_%s_%s", &u->session_id, str_tmp_ipaddr, str_tmp_filename);//%V%Z
 
             ngx_create_hashed_filename(path, file->name.data, file->name.len);
 
@@ -1805,7 +1827,7 @@ static ngx_int_t ngx_http_upload_start_handler(ngx_http_upload_ctx_t *u) { /* {{
 
             file->offset = u->content_range_n.start;
         } else {
-            rc = ngx_create_upload_temp_file(file, u->file_name, path, r->pool, ulcf->store_access);
+            rc = ngx_create_upload_temp_file(r, file, u->file_name, path, r->pool, ulcf->store_access);
 
             if (rc != NGX_OK) {
                 return NGX_UPLOAD_IOERROR;
